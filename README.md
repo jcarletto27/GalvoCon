@@ -19,20 +19,7 @@ This project uses a Raspberry Pi and a custom C extension leveraging `pigpio` to
 
 ## Schematic
 
-Refer to the included schematic for wiring the Raspberry Pi to the DAC, laser, and safety interlocks: `Schematic/schematic.png`
-
-Key GPIO assignments:
-
-
-- **GPIO 18**: Laser PWM
-
-
-- **GPIO 24**: Hardware Interlock / E-Stop (Pull to Ground to trip)
-
-
-- **GPIO 25**: Red Dot Framing Laser
-
-
+Refer to the included schematic for wiring the Raspberry Pi to the DAC, laser: `Schematic/schematic.png`
 
 ## Installation (Docker - Recommended)
 
