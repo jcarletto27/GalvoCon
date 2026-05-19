@@ -1,0 +1,15 @@
+services:
+  galvocon:
+    build: .
+    container_name: galvocon
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    # CRITICAL: These privileges are required for memory-mapping the Pi's GPIO and SPI
+    privileged: true
+    devices:
+      - "/dev/mem:/dev/mem"
+      - "/dev/gpiomem:/dev/gpiomem"
+      - "/dev/spidev0.0:/dev/spidev0.0"
+    volumes:
+      - .:/opt/GalvoCon

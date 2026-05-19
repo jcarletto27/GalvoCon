@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galvo Controller</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; flex-direction: row; justify-content: center; flex-wrap: wrap; margin-top: 30px; background-color: #f4f4f9; }
+        .panel { margin: 10px; width: 90%; max-width: 400px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        input[type=range] { width: 100%; margin-top: 10px; }
+        h2, h3 { color: #333; margin-top: 0; }
+        .header { width: 100%; text-align: center; }
+        .val-display { font-weight: bold; color: #0066cc; }
+        .button-group { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+        button { background-color: #0066cc; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; flex-grow: 1; font-weight: bold; }
+        button:hover { background-color: #005bb5; }
+        button:disabled { background-color: #aaa; cursor: not-allowed; }
+        .btn-secondary { background-color: #555; }
+        .btn-secondary:hover { background-color: #333; }
+        .btn-warning { background-color: #d39e00; }
+        .btn-danger { background-color: #cc0000; }
+        .jog-pad { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 15px; max-width: 200px; margin-left: auto; margin-right: auto; }
+        .jog-btn { padding: 15px 0; font-size: 18px; }
+        .step-selector { display: flex; justify-content: center; gap: 10px; margin-top: 10px; }
+        
+        .canvas-wrapper {
+            position: relative; width: 100%; height: auto; aspect-ratio: 1/1;
+            background-color: #111; border: 2px solid #333; border-radius: 4px;
+            overflow: hidden; cursor: grab;
+        }
+        .canvas-wrapper:active { cursor: grabbing; }
+        #previewCanvas, #burnCanvas, #headCanvas { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0; 
+        }
+        #previewCanvas { z-index: 1; opacity: 0.8; }
+        #burnCanvas { z-index: 2; }
+        #headCanvas { z-index: 3; }
+        
+        .status-container { margin-top: 20px; }
+        .status-text { font-weight: bold; margin-bottom: 5px; font-size: 14px; }
+        .progress-track { width: 100%; background: #ddd; border-radius: 5px; overflow: hidden; height: 15px; }
+        .progress-fill { width: 0%; height: 100%; background: #0066cc; transition: width 0.2s linear; }
+    </style>
+</head>
+<body>
+    <div class="header"><h2>Raspberry Pi Galvo Controller</h2></div>
+    <div>
+        <div class="panel">
+            <h3>Run G-Code</h3>
+            <input type="file" id="gcodeFile" accept=".gcode,.nc">
+            <div class="button-group">
+                <button id="btn-upload" onclick="submitJob('run')">Upload & Run</button>
+                <button id="btn-frame" class="btn-secondary" onclick="submitJob('frame')">Frame Box</button>
+            </div>
+            <div class="button-group" style="margin-top: 10px;">
+                <button id="btn-pause" class="btn-warning" onclick="togglePause()" disabled>Pause</button>
+                <button id="btn-stop" class="btn-danger" onclick="stopGcode()" disabled>Stop</button>
+            </div>
+            <div class="status-container">
+                <div class="status-text">Status: <span id="job-status-text" style="color: #666;">Idle</span></div>
+                <div class="progress-track"><div id="job-progress" class="progress-fill"></div></div>
+            </div>
+            <button id="btn-convert" class="btn-secondary" style="margin-top: 15px; width: 100%;" onclick="convertAndDownload()">Convert & Download G90</button>
+        </div>
+
+        <div class="panel">
+            <h3>Print Settings</h3>
+            <label for="speed">Burn Speed Multiplier: <span id="speed-val" class="val-display">100%</span></label>
+            <input type="range" id="speed" min="10" max="500" value="100" oninput="updateSettings()">
+            <label for="pwm" style="display:block; margin-top:15px;">Laser Max Power (PWM): <span id="pwm-val" class="val-display">254</span></label>
+            <input type="range" id="pwm" min="0" max="254" value="254" oninput="updateSettings()">
+        </div>
+
+        <div class="panel">
+            <h3>Manual Control</h3>
+            <label for="x">X Axis: <span id="x-val" class="val-display">2048</span></label>
+            <input type="range" id="x" min="0" max="4095" value="2048" oninput="updateManualSlider()">
+            <label for="y" style="display:block; margin-top:15px;">Y Axis: <span id="y-val" class="val-display">2048</span></label>
+            <input type="range" id="y" min="0" max="4095" value="2048" oninput="updateManualSlider()">
+            <hr style="margin-top: 20px;">
+            <div class="step-selector">
+                <label><input type="radio" name="jogStep" value="10" checked> 10 (Fine)</label>
+                <label><input type="radio" name="jogStep" value="100"> 100 (Med)</label>
+                <label><input type="radio" name="jogStep" value="500"> 500 (Coarse)</label>
+            </div>
+            <div class="jog-pad">
+                <div></div><button class="btn-secondary jog-btn" onclick="jog(0, 1)">&#9650;</button><div></div>
+                <button class="btn-secondary jog-btn" onclick="jog(-1, 0)">&#9664;</button>
+                <button class="btn-secondary jog-btn" onclick="goHome()">H</button>
+                <button class="btn-secondary jog-btn" onclick="jog(1, 0)">&#9654;</button>
+                <div></div><button class="btn-secondary jog-btn" onclick="jog(0, -1)">&#9660;</button><div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>Live View</h3>
+        <div class="canvas-wrapper" id="canvasWrapper">
+            <canvas id="previewCanvas" width="500" height="500"></canvas>
+            <canvas id="burnCanvas" width="500" height="500"></canvas>
+            <canvas id="headCanvas" width="500" height="500"></canvas>
+        </div>
+        <button onclick="resetLiveView()" class="btn-secondary" style="margin-top: 15px; width: 100%;">Reset View</button>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        const prevCanvas = document.getElementById('previewCanvas');
+        const prevCtx = prevCanvas.getContext('2d');
+        const burnCanvas = document.getElementById('burnCanvas');
+        const burnCtx = burnCanvas.getContext('2d');
+        const headCanvas = document.getElementById('headCanvas');
+        const headCtx = headCanvas.getContext('2d');
+        const canvasWrapper = document.getElementById('canvasWrapper');
+        
+        let targetX = 2048, targetY = 2048, laserIsOn = false, currentPwm = 0;
+        let currentBounds = { min_x: 0, max_x: 4095, min_y: 0, max_y: 4095 };
+        let lastRenderX = 2048, lastRenderY = 2048;
+
+        // PAN & ZOOM
+        let viewScale = 1.0, viewPanX = 0, viewPanY = 0, isPanning = false, startPanX = 0, startPanY = 0;
+
+        function applyViewTransform() {
+            const tr = `matrix(${viewScale}, 0, 0, ${viewScale}, ${viewPanX}, ${viewPanY})`;
+            prevCanvas.style.transform = tr; burnCanvas.style.transform = tr; headCanvas.style.transform = tr;
+        }
+
+        canvasWrapper.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const rect = canvasWrapper.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
+            const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+            viewPanX = mouseX - (mouseX - viewPanX) * zoomFactor;
+            viewPanY = mouseY - (mouseY - viewPanY) * zoomFactor;
+            viewScale *= zoomFactor;
+            applyViewTransform();
+        });
+
+        canvasWrapper.addEventListener('mousedown', (e) => { isPanning = true; startPanX = e.clientX - viewPanX; startPanY = e.clientY - viewPanY; });
+        window.addEventListener('mousemove', (e) => { if (isPanning) { viewPanX = e.clientX - startPanX; viewPanY = e.clientY - startPanY; applyViewTransform(); } });
+        window.addEventListener('mouseup', () => { isPanning = false; });
+        function resetLiveView() { viewScale = 1.0; viewPanX = 0; viewPanY = 0; applyViewTransform(); }
+
+        function clearVisualizer() {
+            prevCtx.clearRect(0, 0, prevCanvas.width, prevCanvas.height);
+            burnCtx.clearRect(0, 0, burnCanvas.width, burnCanvas.height);
+            headCtx.clearRect(0, 0, headCanvas.width, headCanvas.height);
+        }
+
+        // PREVIEW DRAWING
+        socket.on('render_preview', function(data) {
+            prevCtx.clearRect(0, 0, prevCanvas.width, prevCanvas.height);
+            let rangeX = data.bounds.max_x - data.bounds.min_x, rangeY = data.bounds.max_y - data.bounds.min_y;
+            let maxRange = Math.max(rangeX <= 0 ? 4095 : rangeX, rangeY <= 0 ? 4095 : rangeY) * 1.2;
+            let centerX = data.bounds.min_x + rangeX / 2, centerY = data.bounds.min_y + rangeY / 2;
+            let viewMinX = centerX - maxRange / 2, viewMinY = centerY - maxRange / 2;
+
+            prevCtx.beginPath();
+            prevCtx.strokeStyle = 'rgba(80, 80, 200, 0.4)';
+            prevCtx.lineWidth = 1;
+            let isDrawing = false;
+
+            data.path.forEach(pt => {
+                let cx = ((pt[0] - viewMinX) / maxRange) * prevCanvas.width;
+                let cy = prevCanvas.height - (((pt[1] - viewMinY) / maxRange) * prevCanvas.height);
+                if (pt[2] === 1) {
+                    if (!isDrawing) { prevCtx.beginPath(); prevCtx.moveTo(cx, cy); isDrawing = true; } 
+                    else { prevCtx.lineTo(cx, cy); }
+                } else if (isDrawing) { prevCtx.stroke(); isDrawing = false; }
+            });
+            if (isDrawing) prevCtx.stroke();
+        });
+
+        // LIVE BURN TRACKER
+        function renderLoop() {
+            let maxRange = Math.max(currentBounds.max_x - currentBounds.min_x || 4095, currentBounds.max_y - currentBounds.min_y || 4095) * 1.2;
+            let viewMinX = (currentBounds.min_x + (currentBounds.max_x - currentBounds.min_x)/2) - maxRange / 2;
+            let viewMinY = (currentBounds.min_y + (currentBounds.max_y - currentBounds.min_y)/2) - maxRange / 2;
+
+            function getCoords(dx, dy) {
+                return { x: ((dx - viewMinX) / maxRange) * burnCanvas.width, y: burnCanvas.height - (((dy - viewMinY) / maxRange) * burnCanvas.height) };
+            }
+
+            headCtx.clearRect(0, 0, headCanvas.width, headCanvas.height);
+            if (targetX !== lastRenderX || targetY !== lastRenderY) {
+                const prev = getCoords(lastRenderX, lastRenderY), curr = getCoords(targetX, targetY);
+                if (laserIsOn && currentPwm > 0) {
+                    burnCtx.beginPath(); burnCtx.moveTo(prev.x, prev.y); burnCtx.lineTo(curr.x, curr.y);
+                    burnCtx.strokeStyle = `rgba(255, 0, 68, ${Math.max(0.05, currentPwm / (parseInt(document.getElementById('pwm').value) || 254))})`; 
+                    burnCtx.lineWidth = 1.5; burnCtx.stroke();
+                }
+                lastRenderX = targetX; lastRenderY = targetY;
+            }
+
+            const head = getCoords(targetX, targetY);
+            headCtx.beginPath(); headCtx.arc(head.x, head.y, 4, 0, Math.PI * 2);
+            headCtx.fillStyle = laserIsOn ? '#ffffff' : 'rgba(85, 85, 85, 0.5)'; headCtx.fill();
+            requestAnimationFrame(renderLoop);
+        }
+        requestAnimationFrame(renderLoop);
+
+        // SOCKET TELEMETRY
+        socket.on('telemetry', function(data) {
+            targetX = data.current_x; targetY = data.current_y; laserIsOn = data.laser_on; currentPwm = data.current_pwm;
+            if (data.bounds) currentBounds = data.bounds;
+            
+            const isBusy = data.status === "printing" || data.status === "parsing" || data.status === "framing" || data.status === "paused";
+            document.getElementById('btn-upload').disabled = isBusy;
+            document.getElementById('btn-frame').disabled = isBusy;
+            document.getElementById('btn-stop').disabled = !isBusy;
+            document.getElementById('btn-pause').disabled = !(data.status === "printing" || data.status === "paused");
+            document.getElementById('btn-pause').innerText = data.status === "paused" ? "Resume" : "Pause";
+            document.getElementById('job-progress').style.width = data.progress + "%";
+            
+            const sText = document.getElementById('job-status-text');
+            if (data.status === "idle") { sText.innerText = "Idle"; sText.style.color = "#666"; } 
+            else if (data.status === "parsing") { sText.innerText = `Parsing... (${data.progress}%)`; sText.style.color = "#cc8800"; } 
+            else if (data.status === "framing") { sText.innerText = "Framing Boundary..."; sText.style.color = "#cc8800"; } 
+            else if (data.status === "printing") { sText.innerText = `Printing (${data.progress}%)`; sText.style.color = "#0066cc"; } 
+            else if (data.status === "paused") { sText.innerText = `PAUSED (${data.progress}%)`; sText.style.color = "#d39e00"; } 
+            else if (data.status === "completed") { sText.innerText = "Job Completed!"; sText.style.color = "#009900"; } 
+            else if (data.status === "stopped") { sText.innerText = "Job Stopped."; sText.style.color = "#cc0000"; }
+            
+            if (isBusy) {
+                document.getElementById('x').value = data.current_x; document.getElementById('x-val').innerText = data.current_x;
+                document.getElementById('y').value = data.current_y; document.getElementById('y-val').innerText = data.current_y;
+            }
+        });
+
+        function updateSettings() {
+            document.getElementById('speed-val').innerText = document.getElementById('speed').value + '%';
+            document.getElementById('pwm-val').innerText = document.getElementById('pwm').value;
+            fetch('/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ speed: document.getElementById('speed').value, pwm: document.getElementById('pwm').value }) });
+        }
+
+        function pushManualMove(x, y) {
+            document.getElementById('x').value = x; document.getElementById('x-val').innerText = x;
+            document.getElementById('y').value = y; document.getElementById('y-val').innerText = y;
+            socket.emit('jog_cmd', {x: x, y: y}); clearVisualizer();
+        }
+
+        function updateManualSlider() { if (!document.getElementById('btn-upload').disabled) pushManualMove(parseInt(document.getElementById('x').value), parseInt(document.getElementById('y').value)); }
+        function jog(xDir, yDir) {
+            if (document.getElementById('btn-upload').disabled) return; 
+            const step = parseInt(document.querySelector('input[name="jogStep"]:checked').value);
+            pushManualMove(Math.max(0, Math.min(4095, parseInt(document.getElementById('x').value) + (xDir * step))), Math.max(0, Math.min(4095, parseInt(document.getElementById('y').value) + (yDir * step))));
+        }
+        function goHome() { if (!document.getElementById('btn-upload').disabled) pushManualMove(2048, 2048); }
+
+        function submitJob(actionType) {
+            const fileInput = document.getElementById('gcodeFile');
+            if (fileInput.files.length === 0) { alert("Please select a file first."); return; }
+            const formData = new FormData(); formData.append("file", fileInput.files[0]); formData.append("action", actionType); 
+            clearVisualizer(); resetLiveView();
+            fetch('/upload', { method: 'POST', body: formData }).then(res => res.json()).then(data => { if(data.error) alert("Upload Error: " + data.error); }).catch(console.error);
+        }
+
+        function togglePause() { fetch('/toggle_pause', { method: 'POST' }); }
+        function stopGcode() { fetch('/stop', { method: 'POST' }); }
+
+        function convertAndDownload() {
+            const fileInput = document.getElementById('gcodeFile');
+            if (fileInput.files.length === 0) { alert("Please select a file to convert."); return; }
+            const formData = new FormData(); formData.append("file", fileInput.files[0]);
+            fetch('/convert', { method: 'POST', body: formData }).then(res => res.json()).then(data => {
+                if (data.status === "success") {
+                    const a = document.createElement('a'); a.href = window.URL.createObjectURL(new Blob([data.converted_data], { type: 'text/plain' }));
+                    a.download = `flattened_g90.gcode`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                } else alert("Conversion failed: " + data.error);
+            }).catch(console.error);
+        }
+    </script>
+</body>
+</html>
