@@ -3,9 +3,6 @@
 #include <unistd.h>
 #include <pigpio.h> 
 
-#define INTERLOCK_PIN 24 // E-Stop / Lid Switch (Pull to Ground)
-#define RED_DOT_PIN 25   // Red Framing Laser
-
 typedef struct {
     uint16_t x;
     uint16_t y;
@@ -21,12 +18,6 @@ int run_trajectory(GalvoCmd* cmds, int num_cmds, volatile int* status_flag,
 
     if (gpioInitialise() < 0) return -1;
 
-    // Initialize Safety & Framing Hardware
-    gpioSetMode(INTERLOCK_PIN, PI_INPUT);
-    gpioSetPullUpDown(INTERLOCK_PIN, PI_PUD_UP); 
-    gpioSetMode(RED_DOT_PIN, PI_OUTPUT);
-    gpioWrite(RED_DOT_PIN, 0);
-
     // 20MHz SPI mapping
     int spi = spiOpen(0, 20000000, 0);
     if (spi < 0) {
@@ -39,14 +30,6 @@ int run_trajectory(GalvoCmd* cmds, int num_cmds, volatile int* status_flag,
 
     for (int i = 0; i < num_cmds; i++) {
         
-        // HARDWARE INTERLOCK CHECK
-        if (gpioRead(INTERLOCK_PIN) == 1) { 
-            gpioPWM(18, 0);
-            gpioWrite(RED_DOT_PIN, 0);
-            *status_flag = 5; // Force Python state to "Stopped"
-            break;
-        }
-
         if (*status_flag == 1) {
             gpioPWM(18, 0);
             *current_pwm = 0;
@@ -66,14 +49,6 @@ int run_trajectory(GalvoCmd* cmds, int num_cmds, volatile int* status_flag,
         buf[0] = 0xB0 | (vy >> 8);
         buf[1] = vy & 0xFF;
         spiWrite(spi, buf, 2);
-
-        // RED DOT LOGIC (Framing state = 2)
-        if (*status_flag == 2) { 
-            gpioWrite(RED_DOT_PIN, 1); 
-            cmds[i].pwm_val = 0;       
-        } else {
-            gpioWrite(RED_DOT_PIN, 0);
-        }
 
         // DMA Throttle cache
         if (cmds[i].pwm_val != last_pwm) {
@@ -101,7 +76,6 @@ int run_trajectory(GalvoCmd* cmds, int num_cmds, volatile int* status_flag,
     }
 
     gpioPWM(18, 0);
-    gpioWrite(RED_DOT_PIN, 0);
     *current_pwm = 0;
     spiClose(spi);
     gpioTerminate();

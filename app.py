@@ -37,15 +37,27 @@ class GalvoCmd(ctypes.Structure):
         ("delay_us", ctypes.c_uint32)
     ]
 
+# --- AUTO-COMPILE C-LIBRARY TO PREVENT ARCHITECTURE MISMATCH ---
+# Force remove the old library to guarantee a clean compile
+if os.path.exists('./galvo_core.so'):
+    try:
+        os.remove('./galvo_core.so')
+    except OSError: pass
+
+print("Compiling galvo_core.c for the current architecture...")
+os.system('gcc -shared -o galvo_core.so -fPIC galvo_core.c -lpigpio -lpthread')
+
 try:
-    galvo_c = ctypes.CDLL('./galvo_core.so')
+    galvo_c = ctypes.CDLL(os.path.abspath('./galvo_core.so'))
     galvo_c.run_trajectory.argtypes = [
         ctypes.POINTER(GalvoCmd), ctypes.c_int, ctypes.POINTER(ctypes.c_int), 
         ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), 
         ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_double) 
     ]
-except OSError:
-    logger.error("galvo_core.so not found! C-backend will not work.")
+    print("C-Library loaded successfully!")
+except OSError as e:
+    print(f"\n[!!!] FATAL ERROR LOADING C-LIBRARY: {e}\n")
+    logger.error(f"galvo_core.so load failed: {e}")
     galvo_c = None
 
 # --- SHARED MEMORY ---
@@ -140,7 +152,8 @@ def build_c_array(gcode_text, pwm_max, preview_q, progress_var=None):
                 val = float(v2)
                 if c2 == 'X': target_x = val if is_abs else curr_x + val
                 elif c2 == 'Y' or c2 == 'A': target_y = val if is_abs else curr_y + val
-                elif c2 == 'I': i = val; elif c2 == 'J': j = val
+                elif c2 == 'I': i = val
+                elif c2 == 'J': j = val
                 elif c2 == 'S': s_val = val; max_s = max(max_s, val)
                 elif c2 == 'F': f_val = val
 
@@ -290,8 +303,16 @@ def process_job(gcode_text, action, pwm_max, preview_q):
     c_status.value = 1; c_progress.value = 0
     cmd_array, num_cmds = build_c_array(gcode_text, pwm_max, preview_q, c_progress)
     
-    if action == 'frame': c_status.value = 2; run_frame()
-    elif num_cmds > 0 and galvo_c:
+    if action == 'frame': 
+        c_status.value = 2
+        run_frame()
+    elif num_cmds > 0:
+        if galvo_c is None:
+            print("Cannot print: C-library failed to load during startup!")
+            logger.error("Cannot print: C-library not loaded!")
+            c_status.value = 5 # Force status to stopped so UI doesn't hang
+            return
+
         c_status.value = 3; c_progress.value = 0
         try: spi.close() 
         except: pass
@@ -366,7 +387,8 @@ def preprocess_gcode_to_text(gcode_text):
                 val = float(v2)
                 if c2 == 'X': target_x = val if is_abs else curr_x + val
                 elif c2 == 'Y' or c2 == 'A': target_y = val if is_abs else curr_y + val
-                elif c2 == 'I': i = val; elif c2 == 'J': j = val
+                elif c2 == 'I': i = val
+                elif c2 == 'J': j = val
                 elif c2 == 'S': s_val = str(val)
                 elif c2 == 'F': f_val = str(val)
 
@@ -469,7 +491,8 @@ def upload_gcode():
     if 'file' not in request.files: return jsonify({"error": "No file part"}), 400
     file = request.files['file']
     if file and (file.filename.endswith('.gcode') or file.filename.endswith('.nc')):
-        p = Process(target=process_job, args=(file.read().decode('utf-8', errors='replace'), request.form.get('action', 'run'), c_laser_pwm_max.value, preview_queue))
+        action = request.form.get('action', 'run')
+        p = Process(target=process_job, args=(file.read().decode('utf-8', errors='replace'), action, c_laser_pwm_max.value, preview_queue))
         p.daemon = True; p.start()
         return jsonify({"status": "success", "message": "Job dispatched"})
     return jsonify({"error": "Invalid file type"}), 400
