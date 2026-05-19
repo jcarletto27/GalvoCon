@@ -2,7 +2,7 @@
 
 A high-performance, web-based G-code controller for laser galvanometer scanners.
 
-This project uses a Raspberry Pi and a custom C extension leveraging `pigpio` to achieve 15kpps+ hardware-timed SPI streaming. By utilizing Direct Memory Access (DMA) and multi-processing, it guarantees deterministic hardware timing, bypassing standard Linux kernel jitter while providing a zero-latency WebSockets UI.
+This project uses a Raspberry Pi and a custom C extension leveraging `pigpio` to achieve 15kpps+ hardware-timed SPI streaming. By utilizing Direct Memory Access (DMA) and real-time multiprocessing, it guarantees deterministic hardware timing, bypassing standard Linux kernel jitter while providing a zero-latency WebSockets UI.
 
 ## Hardware Requirements
 
@@ -19,16 +19,27 @@ This project uses a Raspberry Pi and a custom C extension leveraging `pigpio` to
 
 ## Schematic
 
-Refer to the included schematic for wiring the Raspberry Pi to the DAC, laser: `Schematic/schematic.png`
+Refer to the included schematic for wiring the Raspberry Pi to the DAC, laser, and safety interlocks: `Schematic/schematic.png`
+
+Key GPIO assignments:
+
+
+- **GPIO 18**: Laser PWM
+
+
+- **GPIO 24**: Hardware Interlock / E-Stop (Pull to Ground to trip)
+
+
+- **GPIO 25**: Red Dot Framing Laser
 
 
 
 ## Installation (Docker - Recommended)
 
-Running via Docker Compose isolates the dependencies while passing through the necessary `/dev/mem` privileges for hardware control.
+The easiest way to deploy the controller is using the pre-built Docker image.
 
 
-1. Ensure the default OS-level `pigpiod` daemon is stopped and disabled:
+1. Ensure the default OS-level `pigpiod` daemon is stopped and disabled to free up the hardware memory locks:
 
 ```
 sudo systemctl stop pigpiod sudo systemctl disable pigpiod sudo killall pigpiod   
@@ -36,10 +47,18 @@ sudo systemctl stop pigpiod sudo systemctl disable pigpiod sudo killall pigpiod
 ```
 
 
-1. Build and start the container:
+1. Create a `docker-compose.yml` file targeting the published image:
 
 ```
-docker compose up -d --build   
+services: galvocon: image: jcarletto/galvocon:latest container_name: galvocon restart: unless-stopped ports: - "5000:5000" privileged: true devices: - "/dev/mem:/dev/mem" - "/dev/gpiomem:/dev/gpiomem" - "/dev/spidev0.0:/dev/spidev0.0"   
+
+```
+
+
+1. Pull and start the container:
+
+```
+docker compose up -d   
 
 ```
 
@@ -47,9 +66,11 @@ docker compose up -d --build
 
 The application will be available at `http://<YOUR_PI_IP>:5000`.
 
+*(Note: To build the Docker image locally from source instead of pulling from Docker Hub, clone this repository and run `docker compose up -d --build` using the provided Dockerfile).*
+
 ## Installation (Bare Metal)
 
-If you prefer to run the application directly on the host OS, you must compile `pigpio` from source and run the application as root.
+If you prefer to run the application directly on the host OS without Docker, you must compile `pigpio` from source and run the application as root.
 
 
 1. Install system dependencies:
@@ -72,6 +93,7 @@ cd /tmp wget [https://github.com/joan2937/pigpio/archive/master.zip](https://git
 
 ```
 cd /path/to/GalvoCon pip3 install -r requirements.txt   
+
 ```
 
 
@@ -83,7 +105,7 @@ gcc -shared -o galvo_core.so -fPIC galvo_core.c -lpigpio -lpthread
 ```
 
 
-1. Run the server (Requires `sudo` for DMA memory access):
+1. Run the server (Requires `sudo` for DMA memory access and real-time scheduling):
 
 ```
 sudo python3 app.py   

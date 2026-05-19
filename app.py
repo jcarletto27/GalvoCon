@@ -495,4 +495,5 @@ def convert_gcode():
 if __name__ == '__main__':
     threading.Thread(target=emit_telemetry, daemon=True).start()
     threading.Thread(target=preview_listener, daemon=True).start()
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+    # allow_unsafe_werkzeug=True bypasses the strict production check while allowing us to keep debug off
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
