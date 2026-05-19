@@ -31,16 +31,16 @@ Running via Docker Compose isolates the dependencies while passing through the n
 1. Ensure the default OS-level `pigpiod` daemon is stopped and disabled:
 
 ```
-`sudo systemctl stop pigpiod sudo systemctl disable pigpiod sudo killall pigpiod   
-`
+sudo systemctl stop pigpiod sudo systemctl disable pigpiod sudo killall pigpiod   
+
 ```
 
 
 1. Build and start the container:
 
 ```
-`docker compose up -d --build   
-`
+docker compose up -d --build   
+
 ```
 
 
@@ -55,40 +55,39 @@ If you prefer to run the application directly on the host OS, you must compile `
 1. Install system dependencies:
 
 ```
-`sudo apt-get update sudo apt-get install -y build-essential wget unzip python3-pip   
-`
+sudo apt-get update sudo apt-get install -y build-essential wget unzip python3-pip   
+
 ```
 
 
 1. Download and compile `pigpio` from source:
 
 ```
-`cd /tmp wget [https://github.com/joan2937/pigpio/archive/master.zip](https://github.com/joan2937/pigpio/archive/master.zip) unzip master.zip cd pigpio-master make sudo make install   
-`
+cd /tmp wget [https://github.com/joan2937/pigpio/archive/master.zip](https://github.com/joan2937/pigpio/archive/master.zip) unzip master.zip cd pigpio-master make sudo make install   
+
 ```
 
 
 1. Install Python requirements:
 
 ```
-`cd /path/to/GalvoCon pip3 install -r requirements.txt   
-`
+cd /path/to/GalvoCon pip3 install -r requirements.txt   
 ```
 
 
 1. Compile the native C extension:
 
 ```
-`gcc -shared -o galvo_core.so -fPIC galvo_core.c -lpigpio -lpthread   
-`
+gcc -shared -o galvo_core.so -fPIC galvo_core.c -lpigpio -lpthread   
+
 ```
 
 
 1. Run the server (Requires `sudo` for DMA memory access):
 
 ```
-`sudo python3 app.py   
-`
+sudo python3 app.py   
+
 ```
 
 
